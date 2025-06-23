@@ -1,67 +1,45 @@
-from flask import Flask, request, jsonify
-import requests
-import re
+local HttpService = game:GetService("HttpService")
+local MyHRP = game.Players.LocalPlayer.Character:WaitForChild("HumanoidRootPart")
+local BallFolder = workspace:WaitForChild("BallFolderServer")
 
-app = Flask(__name__)
+while task.wait(0.25) do
+    for _, v in pairs(BallFolder:GetChildren()) do
+        local Ball = v:FindFirstChild("Ball")
+        local Velocity = v:FindFirstChild("Velocity")
+        local BallMagnitude = (v:WaitForChild('Shadow').Position-MyHRP.Position).Magnitude
+        local distance = (MyHRP.Position - v.Ball.Position).Magnitude
 
-@app.route('/decide', methods=['POST'])
-def decide():
-    data = request.json
+        if Ball and Velocity then
 
-    prompt = f"""
-You are a highly skilled volleyball AI.
+            local data = {
+                player = tostring(MyHRP.Position),
+                ball = tostring(Ball.Position),
+                velocity = tostring(Velocity.Value)
+                speed = Velocity.Value.Magnitude
+                isFalling = Velocity.Value.Y < 0
+                distance = (MyHRP.Position - Ball.Position).Magnitude
+                local sameSide = Ball.Position.Z > 0 == MyHRP.Position.Z > 0
+                local timeToLandEstimation = math.abs(Ball.Position.Y / Velocity.Value.Y)
+                local relative = MyHRP.CFrame:ToObjectSpace(Ball.CFrame)
+            }
 
-Your job is to decide whether the player should dive, and if so, which direction, based on:
-- Ball velocity
-- Ball position relative to player
-- Ball movement trend
-- Common spiking behavior
+            local success, response = pcall(function()
+                return request({
+                    Url = "http://localhost:8000/decide",
+                    Method = "POST",
+                    Headers = {
+                        ["Content-Type"] = "application/json"
+                    },
+                    Body = HttpService:JSONEncode(data)
+                })
+            end)
 
-Diving is only necessary if the ball is likely to land close and fast. If it's too far or not a threat, return `Wait`.
-
-Choose one of these 9 responses:
-FrontDive, BackDive, LeftDive, RightDive, FrontLeftDive, FrontRightDive, BackLeftDive, BackRightDive, Wait
-
-Examples:
-
-Player: 0, 5, -30  
-Ball: 10, 8, -42  
-Velocity: 3, -6, 5  
-Answer: BackRightDive
-
-Player: -5, 5, -12  
-Ball: 20, 10, -12  
-Velocity: 1, 0, 0  
-Answer: Wait
-
-Now answer based on:
-Player: {data['player']}  
-Ball: {data['ball']}  
-Velocity: {data['velocity']}  
-If ball is falling: {data['isFalling']}
-Ball speed: {data['ballSpeed']}
-Distance to player: {data['distance']}
-If ball and player are on the same side of the net: {data['sameSideOfNet']}
-You may also request for any additional information for more accurate decisions if necessary.
-Answer:"""
-
-    response = requests.post(
-        "http://localhost:11434/api/generate",
-        json={
-            "model": "llama3",
-            "prompt": prompt,
-            "stream": False
-        }
-    )
-
-    raw = response.json()['response'].strip()
-    print("[RAW]:", raw)
-
-    match = re.search(r"(FrontDive|BackDive|LeftDive|RightDive|FrontLeftDive|FrontRightDive|BackLeftDive|BackRightDive|Wait)", raw)
-    decision = match.group(1) if match else "Wait"
-
-    print("[CLEANED]:", decision)
-    return jsonify({"decision": decision})
-
-if __name__ == "__main__":
-    app.run(port=8000)
+            if success and response then
+                local body = HttpService:JSONDecode(response.Body)
+                if body.decision and body.decision ~= "Wait" then
+                    print("[AI Dive]:", body.decision)
+                end
+            end
+        end
+    end
+end
